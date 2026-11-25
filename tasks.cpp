@@ -5,6 +5,8 @@
 #include <time.h>
 #include <locale.h>
 #include <queue>
+#include <limits.h>
+#include <errno.h>
 
 using namespace std;
 
@@ -164,7 +166,7 @@ void print_graph_characteristics(int *ecc, int size) {
     printf("\n");
 }
 
-bool process_graph(int size, int edge_percent, bool weighted, bool directed) {
+bool process_graph(int size, int edge_percent, bool weighted, bool directed, int start) {
     int **G = generate_adjacency_matrix(size, edge_percent, weighted, directed);
 
     printf("\n================================================\n");
@@ -175,12 +177,13 @@ bool process_graph(int size, int edge_percent, bool weighted, bool directed) {
     printf("\nМатрица смежности G (%d вершин, вероятность ребра - %d%%):\n", size, edge_percent);
     print_matrix(G, size);
 
-    int start;
-    printf("\nВведите начальную вершину (от 0 до %d): ", size - 1);
-    if (scanf("%d", &start) != 1 || start < 0 || start >= size) {
-        printf("Некорректная начальная вершина.\n");
-        free_matrix(G, size);
-        return false;
+    if (start == -1) {
+        printf("\nВведите начальную вершину (от 0 до %d): ", size - 1);
+        if (scanf("%d", &start) != 1 || start < 0 || start >= size) {
+            printf("Некорректная начальная вершина.\n");
+            free_matrix(G, size);
+            return false;
+        }
     }
 
     int *DIST = (int *)malloc(size * sizeof(int));
@@ -219,56 +222,82 @@ bool parse_flag(const char *value, bool *result) {
     return false;
 }
 
+bool parse_number(const char *value, int minimum, int maximum, int *result) {
+    char *end;
+    errno = 0;
+    long number = strtol(value, &end, 10);
+    if (end == value || *end != '\0' || errno == ERANGE || number < minimum || number > maximum)
+        return false;
+    *result = (int)number;
+    return true;
+}
+
 int main(int argc, char *argv[])
 {
     srand(time(NULL));
 
     bool weighted = true, directed = false;
     bool directed_set = false;
+    int size = 10, edge_percent = 50, start = 0;
 
     for (int i = 1; i < argc; i++) {
-        if ((strcmp(argv[i], "-weighted") == 0 || strcmp(argv[i], "-directed") == 0)
-                && i + 1 == argc) {
-            printf("Не указано значение параметра %s.\n", argv[i]);
+        const char *option = argv[i];
+        bool size_option = strcmp(option, "-size") == 0 || strcmp(option, "-vertices") == 0;
+        bool probability_option = strcmp(option, "-edge_precent") == 0 || strcmp(option, "-probability") == 0;
+        if (strcmp(option, "-weighted") && strcmp(option, "-directed") &&
+            !size_option && !probability_option && strcmp(option, "-start")) {
+            printf("Неизвестный параметр: %s\n", option);
+            printf("Использование: %s [-weighted 0|1|yes|no] [-directed 0|1|yes|no] "
+                   "[-size N] [-edge_precent 0-100] [-start V]\n", argv[0]);
             return 1;
         }
-        if (strcmp(argv[i], "-weighted") == 0 && i + 1 < argc) {
-            if (!parse_flag(argv[++i], &weighted)) {
-                printf("Некорректное значение параметра -weighted: %s\n", argv[i]);
-                return 1;
-            }
-        } else if (strcmp(argv[i], "-directed") == 0 && i + 1 < argc) {
-            if (!parse_flag(argv[++i], &directed)) {
-                printf("Некорректное значение параметра -directed: %s\n", argv[i]);
-                return 1;
-            }
+        if (++i == argc) {
+            printf("Не указано значение параметра %s.\n", option);
+            return 1;
+        }
+        bool valid;
+        if (strcmp(option, "-weighted") == 0) {
+            valid = parse_flag(argv[i], &weighted);
+        } else if (strcmp(option, "-directed") == 0) {
+            valid = parse_flag(argv[i], &directed);
             directed_set = true;
+        } else if (size_option) {
+            valid = parse_number(argv[i], 1, INT_MAX, &size);
+        } else if (probability_option) {
+            valid = parse_number(argv[i], 0, 100, &edge_percent);
         } else {
-            printf("Неизвестный параметр: %s\n", argv[i]);
-            printf("Использование: %s [-weighted 0|1|yes|no] [-directed 0|1|yes|no]\n", argv[0]);
+            valid = parse_number(argv[i], 0, INT_MAX, &start);
+        }
+        if (!valid) {
+            printf("Некорректное значение параметра %s: %s\n", option, argv[i]);
             return 1;
         }
     }
 
-    int size, edge_percent;
-
-    printf("Введите количество вершин графа: ");
-    if (scanf("%d", &size) != 1 || size <= 0) {
-        printf("Некорректное количество вершин.");
+    if (size == -1) {
+        printf("Введите количество вершин графа: ");
+        if (scanf("%d", &size) != 1 || size <= 0) {
+            printf("Некорректное количество вершин.\n");
+            return 1;
+        }
+    }
+    if (start >= size) {
+        printf("Начальная вершина должна быть от 0 до %d.\n", size - 1);
         return 1;
     }
-
-    printf("Введите вероятность появления ребра в процентах (0-100): ");
-    if (scanf("%d", &edge_percent) != 1 || edge_percent < 0 || edge_percent > 100) {
-        printf("Некорректная вероятность.");
-        return 1;
+    if (edge_percent == -1) {
+        printf("Введите вероятность появления ребра в процентах (0-100): ");
+        if (scanf("%d", &edge_percent) != 1 || edge_percent < 0 || edge_percent > 100) {
+            printf("Некорректная вероятность.\n");
+            return 1;
+        }
     }
 
     if (directed_set) {
-        if (!process_graph(size, edge_percent, weighted, directed)) return 1;
+        if (!process_graph(size, edge_percent, weighted, directed, start)) return 1;
     } else {
-        if (!process_graph(size, edge_percent, weighted, false)) return 1;
-        if (!process_graph(size, edge_percent, weighted, true)) return 1;
+        if (!process_graph(size, edge_percent, weighted, false, start)) return 1;
+        if (!process_graph(size, edge_percent, weighted, true, start)) return 1;
     }
 
     return 0;
